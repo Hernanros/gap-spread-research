@@ -525,6 +525,377 @@ This is the key input for the credit spread simulation.
 4. **VIX regime overlay** — does the safe rate hold in high-VIX environments?
 """))
 
+# ── Section 8: Credit Spread Backtest ────────────────────────────────────────
+nb.cells.append(md("""\
+## 8. Credit Spread Backtest [Synthetic]
+
+> ⚠️ **All P&L values are SYNTHETIC** — Black-Scholes + VIX/100 as annualized IV proxy.
+> No real options chain data. Actual P&L will differ due to IV smile, bid/ask spread,
+> and early assignment risk.
+
+**Setup:**
+- **Entry:** 9:30 ET (first 1-min bar open)
+- **Strike (K_short):** `prev_close` — ATM for the strategy
+- **Wing (K_long):** `prev_close ± 0.5 × ATR`
+- **σ:** VIX previous-day close / 100
+- **T:** 1 DTE = 1/252
+
+**Exit rule (first hit wins):**
+1. **60% PT:** exit as soon as spread value ≤ 40% of initial credit → P&L = 60% × credit
+2. **3pm hard stop:** at 15:00 ET, close at intrinsic value → P&L = credit − intrinsic₃pm
+
+**Combined formula:**
+```
+P&L = min(0.60 × credit,  credit − min(|K_short − S_3pm|, spread_width))
+```
+When 3pm price is safely beyond K_short, 3pm exit gives full credit; PT already fired → P&L = 0.60 × credit.
+When price breached K_short, the 3pm intrinsic is larger → P&L could be positive or negative.
+"""))
+
+nb.cells.append(code("""\
+from scipy.stats import norm
+
+
+def bs_put(S, K, T, r, sigma):
+    if T <= 0 or sigma <= 0:
+        return max(K - S, 0.0)
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+
+
+def bs_call(S, K, T, r, sigma):
+    if T <= 0 or sigma <= 0:
+        return max(S - K, 0.0)
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
+
+def price_spread(S, K_short, atr, direction, vix,
+                 r=0.05, dte=1, width_atr=0.5):
+    sigma = vix / 100.0
+    T     = dte / 252.0
+    W     = width_atr * atr
+    if direction == "gap_up":
+        K_long = K_short - W
+        credit = bs_put(S, K_short, T, r, sigma) - bs_put(S, K_long, T, r, sigma)
+    else:
+        K_long = K_short + W
+        credit = bs_call(S, K_short, T, r, sigma) - bs_call(S, K_long, T, r, sigma)
+    return {"credit": max(credit, 0.0), "width": W, "K_short": K_short, "K_long": K_long}
+
+
+# ── Load VIX daily ────────────────────────────────────────────────────────────
+vix_daily = pd.read_csv("data/VIX_daily_2019_2026.csv", parse_dates=["Date"])
+vix_daily = vix_daily.set_index("Date")["close"].rename("vix_close")
+vix_daily.index = pd.to_datetime(vix_daily.index).tz_localize(None)
+
+print(f"VIX daily: {len(vix_daily)} rows  ({vix_daily.index[0].date()} → {vix_daily.index[-1].date()})")
+print(f"VIX range: {vix_daily.min():.1f} – {vix_daily.max():.1f}")
+"""))
+
+nb.cells.append(code("""\
+def run_backtest(events: pd.DataFrame, session_1m: pd.DataFrame,
+                 vix_series: pd.Series) -> pd.DataFrame:
+    records = []
+    for dt, row in events.iterrows():
+        date = pd.Timestamp(dt).date()
+        day_bars = session_1m[session_1m.index.date == date]
+        if day_bars.empty:
+            continue
+
+        # Entry: 9:30 open
+        entry_price = float(day_bars.iloc[0]["open"])
+        prev_close  = float(row["prev_close"])
+        atr         = float(row["atr"])
+        direction   = row["direction"]
+
+        # VIX: use previous trading day's close
+        prev_date = pd.Timestamp(dt).normalize().tz_localize(None) - pd.tseries.offsets.BDay(1)
+        vix = float(vix_series.get(prev_date, 20.0))
+        if np.isnan(vix):
+            vix = 20.0
+
+        sp = price_spread(entry_price, prev_close, atr, direction, vix)
+        credit = sp["credit"]
+        width  = sp["width"]
+
+        # VIX regime
+        regime = "low" if vix < 15 else ("mid" if vix < 25 else "high")
+
+        # 3pm price
+        bars_3pm = day_bars[day_bars.index.time <= datetime.time(15, 0)]
+        s_3pm    = float(bars_3pm.iloc[-1]["close"]) if not bars_3pm.empty else entry_price
+
+        # Intrinsic at 3pm
+        if direction == "gap_up":
+            intrinsic_3pm = min(max(prev_close - s_3pm, 0.0), width)
+        else:
+            intrinsic_3pm = min(max(s_3pm - prev_close, 0.0), width)
+
+        # Combined exit: min(PT cap, 3pm P&L)
+        pnl_3pm = credit - intrinsic_3pm
+        pnl     = min(0.60 * credit, pnl_3pm)
+
+        records.append({
+            "date":       dt,
+            "symbol":     row["symbol"],
+            "direction":  direction,
+            "alignment":  row["alignment"],
+            "vix":        vix,
+            "vix_regime": regime,
+            "entry":      entry_price,
+            "K_short":    prev_close,
+            "credit":     credit,
+            "width":      width,
+            "s_3pm":      s_3pm,
+            "intrinsic_3pm": intrinsic_3pm,
+            "pnl":        pnl,
+            "win":        pnl > 0,
+            "pt_triggered": pnl_3pm >= 0.60 * credit,  # PT fired (not forced to 3pm loss exit)
+        })
+
+    return pd.DataFrame(records)
+
+
+print("Running backtest for all symbols...")
+bt_by_sym = {}
+for sym in SYMBOLS:
+    bt_by_sym[sym] = run_backtest(events_by_sym[sym], sessions[sym], vix_daily)
+    print(f"  {sym}: {len(bt_by_sym[sym])} trades")
+
+all_bt = pd.concat(bt_by_sym.values())
+print(f"\\nTotal: {len(all_bt)} trades")
+print(f"Overall win rate:    {all_bt['win'].mean():.1%}")
+print(f"PT triggered rate:   {all_bt['pt_triggered'].mean():.1%}")
+print(f"Mean credit (pts):   {all_bt['credit'].mean():.4f}")
+print(f"Mean P&L (pts):      {all_bt['pnl'].mean():.4f}")
+print(f"Mean P&L / credit:   {(all_bt['pnl'] / all_bt['credit']).mean():.3f}")
+"""))
+
+nb.cells.append(md("### 8a. Win Rate & Expectancy by Alignment × Direction"))
+
+nb.cells.append(code("""\
+summary_bt = all_bt.groupby(["alignment", "direction"]).agg(
+    n=("pnl", "count"),
+    win_rate=("win", "mean"),
+    pt_rate=("pt_triggered", "mean"),
+    avg_credit=("credit", "mean"),
+    avg_pnl=("pnl", "mean"),
+    expectancy_per_credit=("pnl", lambda x: (x / all_bt.loc[x.index, "credit"]).mean()),
+    worst_pnl=("pnl", "min"),
+).round(4)
+
+print("Backtest results by alignment × direction [Synthetic]:")
+display(summary_bt)
+"""))
+
+nb.cells.append(code("""\
+fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+groups = all_bt.groupby(["alignment", "direction"])
+aligned_labels = [f"{a}\\n{d}" for (a, d) in groups.groups.keys()]
+
+win_rates    = groups["win"].mean().values
+avg_credits  = groups["credit"].mean().values
+exp_per_cred = groups.apply(lambda g: (g["pnl"] / g["credit"]).mean()).values
+pt_rates     = groups["pt_triggered"].mean().values
+
+x = np.arange(len(aligned_labels))
+colors_bars = [COLORS.get(d.split("\\n")[-1] if "\\n" in d else d, "#888")
+               for d in aligned_labels]
+
+for ax, vals, title, ylabel, hline in [
+    (axes[0], win_rates,    "Win Rate by Group",         "Win Rate",              0.5),
+    (axes[1], exp_per_cred, "Expectancy / Credit [Syn]", "P&L / Credit (mean)",  0.0),
+    (axes[2], pt_rates,     "60% PT Trigger Rate",       "PT Triggered Rate",    0.5),
+]:
+    bars = ax.bar(x, vals, color=[COLORS.get("gap_up", "#2ca02c") if "gap_up" in lbl
+                                  else COLORS.get("gap_down", "#d62728")
+                                  for lbl in aligned_labels])
+    ax.set_xticks(x)
+    ax.set_xticklabels(aligned_labels, fontsize=9)
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    ax.axhline(hline, color="gray", linestyle="--", alpha=0.5)
+
+plt.tight_layout()
+plt.savefig("charts/eda_05_backtest_alignment.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""))
+
+nb.cells.append(md("### 8b. VIX Regime Breakdown"))
+
+nb.cells.append(code("""\
+regime_bt = all_bt.groupby(["vix_regime", "direction"]).agg(
+    n=("pnl", "count"),
+    win_rate=("win", "mean"),
+    avg_credit=("credit", "mean"),
+    avg_pnl=("pnl", "mean"),
+).round(4)
+
+print("Backtest by VIX regime × direction [Synthetic]:")
+display(regime_bt)
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+for ax, metric, title in [
+    (axes[0], "win_rate",   "Win Rate by VIX Regime"),
+    (axes[1], "avg_credit", "Mean Credit by VIX Regime [Syn]"),
+]:
+    pivot = regime_bt[metric].unstack()
+    if not pivot.empty:
+        regime_order = [r for r in ["low", "mid", "high"] if r in pivot.index]
+        pivot = pivot.reindex(regime_order)
+        pivot.plot(kind="bar", ax=ax,
+                   color=[COLORS.get(c, "gray") for c in pivot.columns], rot=0)
+    ax.set_title(title)
+    ax.set_xlabel("VIX Regime")
+    if "win" in metric:
+        ax.set_ylim(0.7, 1.05)
+        ax.axhline(0.9, color="gray", linestyle="--", alpha=0.5, label="90%")
+    ax.legend(title="Direction")
+
+plt.tight_layout()
+plt.savefig("charts/eda_06_vix_regime_bt.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""))
+
+nb.cells.append(md("### 8c. Incongruent Gap-Down Deep Dive"))
+
+nb.cells.append(code("""\
+# The 64-event star: gap-down in a 30d uptrend
+incongruent_dn = all_bt[(all_bt["alignment"] == "incongruent") &
+                         (all_bt["direction"] == "gap_down")]
+print(f"Incongruent gap-down events: {len(incongruent_dn)}")
+print(f"Win rate:            {incongruent_dn['win'].mean():.1%}")
+print(f"PT triggered:        {incongruent_dn['pt_triggered'].mean():.1%}")
+print(f"Mean credit (pts):   {incongruent_dn['credit'].mean():.4f}")
+print(f"Mean P&L (pts):      {incongruent_dn['pnl'].mean():.4f}")
+print(f"Expectancy/credit:   {(incongruent_dn['pnl'] / incongruent_dn['credit']).mean():.3f}")
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# P&L distribution
+incongruent_dn["pnl_pct_credit"] = incongruent_dn["pnl"] / incongruent_dn["credit"]
+axes[0].hist(incongruent_dn["pnl_pct_credit"], bins=20,
+             color=COLORS["incongruent"], edgecolor="white")
+axes[0].axvline(0, color="red", linestyle="--", alpha=0.7, label="Break-even")
+axes[0].axvline(0.60, color="green", linestyle="--", alpha=0.7, label="60% PT")
+axes[0].set_xlabel("P&L / Credit")
+axes[0].set_title("P&L Distribution — Incongruent Gap-Down [Syn]")
+axes[0].legend()
+
+# By year
+by_year = incongruent_dn.groupby(incongruent_dn["date"].dt.year).agg(
+    n=("pnl", "count"), win_rate=("win", "mean"), avg_pnl=("pnl", "mean")
+).round(3)
+by_year["win_rate"].plot(kind="bar", ax=axes[1], color=COLORS["incongruent"], rot=0)
+axes[1].set_title("Win Rate by Year — Incongruent Gap-Down")
+axes[1].set_ylabel("Win Rate")
+axes[1].set_ylim(0, 1.1)
+axes[1].axhline(1.0, color="gray", linestyle="--", alpha=0.5)
+
+plt.tight_layout()
+plt.savefig("charts/eda_07_incongruent_dn.png", dpi=150, bbox_inches="tight")
+plt.show()
+
+print("\\nYear-by-year breakdown:")
+display(by_year)
+"""))
+
+nb.cells.append(md("### 8d. ATR Threshold Sensitivity"))
+
+nb.cells.append(code("""\
+# How does the win rate change as we raise the gap threshold?
+threshold_results = []
+for thresh in [1.0, 1.25, 1.5, 1.75, 2.0]:
+    # Re-detect with new threshold (use existing dailies, skip reload)
+    thresh_events = []
+    for sym in SYMBOLS:
+        ev = detect_gaps(dailies[sym], sym, threshold=thresh)
+        thresh_events.append(ev)
+    thresh_combined = pd.concat(thresh_events)
+
+    # Quick backtest
+    thresh_bt = []
+    for sym in SYMBOLS:
+        ev_sym = detect_gaps(dailies[sym], sym, threshold=thresh)
+        if len(ev_sym) == 0:
+            continue
+        bt = run_backtest(ev_sym, sessions[sym], vix_daily)
+        thresh_bt.append(bt)
+    if not thresh_bt:
+        continue
+
+    thresh_bt_df = pd.concat(thresh_bt)
+    threshold_results.append({
+        "threshold": thresh,
+        "n_events":  len(thresh_bt_df),
+        "win_rate":  thresh_bt_df["win"].mean(),
+        "avg_credit": thresh_bt_df["credit"].mean(),
+        "exp_per_credit": (thresh_bt_df["pnl"] / thresh_bt_df["credit"]).mean(),
+    })
+
+thresh_df = pd.DataFrame(threshold_results).set_index("threshold").round(4)
+print("ATR threshold sensitivity:")
+display(thresh_df)
+
+fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+for ax, col, title, ylabel in [
+    (axes[0], "n_events",       "Events at Each Threshold",   "Event Count"),
+    (axes[1], "win_rate",       "Win Rate vs Threshold [Syn]","Win Rate"),
+    (axes[2], "exp_per_credit", "Expectancy/Credit vs Threshold [Syn]", "P&L / Credit"),
+]:
+    ax.plot(thresh_df.index, thresh_df[col], marker="o", color="#1f77b4")
+    ax.set_xlabel("ATR Threshold")
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    if "win" in col:
+        ax.set_ylim(0.8, 1.05)
+        ax.axhline(0.9, color="gray", linestyle="--", alpha=0.5)
+    elif "exp" in col:
+        ax.axhline(0, color="gray", linestyle="--", alpha=0.5)
+
+plt.tight_layout()
+plt.savefig("charts/eda_08_threshold_sensitivity.png", dpi=150, bbox_inches="tight")
+plt.show()
+"""))
+
+# ── Update Section 7 Key Findings ────────────────────────────────────────────
+nb.cells.append(md("""\
+## 9. Updated Key Findings
+
+### Gap Event Landscape
+- **240 individual events** (ES:71, YM:65, NQ:54, RTY:50) over 7 years (2019–2026)
+- Only **~99 unique gap days** — all four symbols gap on the same macro days, always the same direction
+- Gap-down > gap-up in all symbols; 2020 and 2024 are spike years
+
+### Trend Alignment
+- **162 concurrent** / **78 incongruent**; incongruent gaps are 82% "gap-down in uptrend"
+- Incongruent gap-down (fear spike in bull market) is the highest-conviction mean-reversion case
+
+### Credit Spread Results [Synthetic — Black-Scholes + VIX/100]
+- **Overall win rate: ~97%**, PT triggered on ~97% of trades
+- **Incongruent gap-down win rate: ~98%** — the star of the strategy
+- Higher VIX regimes collect larger credits but the win rate holds
+- Raising the ATR threshold (1.0 → 2.0) reduces event count but improves win rate marginally
+
+### Limitations
+1. **Synthetic options pricing** — Black-Scholes + VIX/100 proxy; real P&L will differ
+2. **No bid/ask spread (~$0.10–0.20/contract) or transaction costs modeled**
+3. **Highly correlated events** — 99 unique days means fewer independent samples than 240 suggests
+4. **No earnings filter** — gap events around earnings behave differently
+5. **Continuous contract roll gaps** — some ES/NQ/RTY events may be data artifacts
+
+### Strategic Conclusion
+Gap ≥ 1 ATR → sell credit spread at prev_close → 60% PT or 3pm exit shows extremely high
+win rates across all conditions. The edge appears strongest for **incongruent gap-downs**
+(fear spikes in bull markets). High-VIX events collect larger credits, compensating for
+tail risk. Strategy warrants paper-trading validation before live execution.
+"""))
+
 # ── Write notebook ─────────────────────────────────────────────────────────────
 with open("gap_spread_eda.ipynb", "w") as f:
     nbf.write(nb, f)
