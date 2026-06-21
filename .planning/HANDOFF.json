@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-21T15:56:07Z",
+  "phase": null,
+  "phase_name": "gap-spread-research",
+  "phase_dir": ".planning",
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "EDA — gap detection, trend alignment, EOD safety", "status": "done"},
+    {"id": 2, "name": "ATR threshold sweep (0.25×→2.0×)", "status": "done"},
+    {"id": 3, "name": "Strategy A backtest — OTM credit spread", "status": "done"},
+    {"id": 4, "name": "Strategy B backtest — 90-min momentum debit", "status": "done"},
+    {"id": 5, "name": "Strategy C backtest — day-after reversal", "status": "done"},
+    {"id": 6, "name": "Real trade analysis (Jun 15/17/18 screenshots)", "status": "done"},
+    {"id": 7, "name": "Phase 1 presentation notebook + HTML export", "status": "done"}
+  ],
+  "remaining_tasks": [
+    {"id": 8, "name": "Model stop-loss at prev_close — rerun EV at 0.75×ATR", "status": "not_started"},
+    {"id": 9, "name": "VIX regime × alignment stratification table", "status": "not_started"},
+    {"id": 10, "name": "Gap size tier interaction analysis", "status": "not_started"},
+    {"id": 11, "name": "Exit rule optimization (PT target sweep)", "status": "not_started"},
+    {"id": 12, "name": "Build gap_phase2_conditional.ipynb", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {
+      "decision": "0.75×ATR as Phase 2 primary threshold",
+      "rationale": "Triples trade frequency (14→37 unique days/yr) while keeping 93.3% EOD win rate; breakeven WR is 95.3% — only 2% gap, likely closable with stop loss",
+      "phase": "research"
+    },
+    {
+      "decision": "Stop loss at prev_close as Phase 2 first test",
+      "rationale": "Current model has no stop — losing trades cost 92.4% of spread width; a stop at the short strike level would limit losses to ~credit+slippage, potentially turning 0.75×ATR positive EV",
+      "phase": "research"
+    },
+    {
+      "decision": "EOD hold as alternative exit to 60% PT",
+      "rationale": "97.5% win rate at 1.0×ATR means holding to 4pm captures full credit on almost all trades; 60% PT leaves money on the table",
+      "phase": "research"
+    }
+  ],
+  "uncommitted_files": [
+    ".planning/.continue-here.md",
+    "gap_spread_research.ipynb",
+    "build_presentation.py",
+    "build_strategy_notebook.py",
+    "gap_research_phase1.html",
+    "gap_research_phase1.ipynb",
+    "gap_strategy_v2.ipynb"
+  ],
+  "next_action": "Add stop-loss-at-prev_close to Strategy A backtest and rerun EV at each ATR threshold — then build VIX regime × alignment stratification table",
+  "context_notes": "Phase 1 complete. The core finding is solid (97.5% EOD safety) but the simple credit spread structure barely exploits it. The key insight discovered this session: breakeven win rate rises as credit/width falls, so lowering ATR threshold hurts EV despite raising trade frequency. Phase 2 needs two levers: (1) stop loss to cap losing trade costs, (2) secondary filters to identify high-conviction subset where actual win rate exceeds the breakeven threshold."
+}
