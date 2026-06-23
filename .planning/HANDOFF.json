@@ -1,57 +1,199 @@
 {
   "version": "1.0",
-  "timestamp": "2026-06-21T15:56:07Z",
+  "timestamp": "2026-06-22T16:00:00Z",
   "phase": null,
   "phase_name": "gap-spread-research",
   "phase_dir": ".planning",
-  "plan": null,
-  "task": null,
-  "total_tasks": null,
-  "status": "paused",
+  "status": "phase3_complete_at_natural_plateau",
+  "session_end_state": "All research + presentation deliverables done. Two locked rules (R1, M1), validated on ES/NQ/RTY/YM/NKD. Brief rewritten as data-investigator framing (less expert-positioned, more visual, ≤40 words per section). LinkedIn + Twitter match. Folder reorganized into notebooks/ + scripts/ with chdir guards so scripts work from anywhere. README.md added as repo landing page.",
+  "final_folder_structure": {
+    "top_level": ["README.md", "notebooks/", "scripts/", "lib/", "tests/", "data/", "cache/", "charts/", "social/", "docs/", ".planning/", "requirements.txt", "venv/"],
+    "notebooks": "01-11 .ipynb + .html (chronological research trail)",
+    "scripts": "all build_*.py + phase*.py + sizing.py + databento_*.py + pull_nkd.py (with chdir-to-repo-root guards)",
+    "brief_landing_page": "notebooks/11_strategy_brief.html"
+  },
+  "phase_3_progress": {
+    "universe_expansion": {
+      "tested_yfinance": ["SPY", "QQQ", "IWM", "DIA", "^N225", "^GDAXI"],
+      "findings": "US ETFs validate the rule but don't diversify (70-80% gap-day overlap with futures). Yfinance ^N225 (cash Nikkei) showed promise; redone with proper Databento NKD futures (US-session gap, not Tokyo-session gap).",
+      "fdax_status": "UNAVAILABLE — Databento XEUR.EOBI starts 2025-03-10, only 15 months. Killed FDAX from this expansion.",
+      "nkd_databento": {
+        "data_pulled": "data/NKD_1m_2019_2026.csv (98MB, 1-min OHLCV)",
+        "cost_paid_usd": 6.26,
+        "remaining_credits_usd": 73.74,
+        "events_detected": 527,
+        "vs_ES_overlap_pct": 22,
+        "vs_NQ_overlap_pct": 22,
+        "vs_RTY_overlap_pct": 16,
+        "vs_YM_overlap_pct": 20,
+        "diversification_claim": "Only ~22% of NKD events overlap with US futures — 405 NKD-only events/yr is genuine independent signal"
+      },
+      "r1_results_per_symbol_dollars": {
+        "ES": {"annual_ev_usd": 1020, "worst_usd": -460, "n_yr": 8.1},
+        "NQ": {"annual_ev_usd": 828, "worst_usd": -392, "n_yr": 7.4},
+        "RTY": {"annual_ev_usd": 60, "worst_usd": -620, "n_yr": 5.3},
+        "YM": {"annual_ev_usd": 763, "worst_usd": 0.5, "n_yr": 6.7},
+        "NKD": {"annual_ev_usd": 1623, "worst_usd": 0, "n_yr": 21.1}
+      },
+      "m1_results_per_symbol_dollars": {
+        "ES": {"annual_ev_usd": 690, "worst_usd": -420, "n_yr": 3.1},
+        "NQ": {"annual_ev_usd": 1822, "worst_usd": -964, "n_yr": 3.0},
+        "RTY": {"annual_ev_usd": 80, "worst_usd": -315, "n_yr": 2.0},
+        "YM": {"annual_ev_usd": 569, "worst_usd": -384, "n_yr": 3.4},
+        "NKD": {"annual_ev_usd": 3449, "worst_usd": -1284, "n_yr": 17.0}
+      },
+      "key_finding": "NKD is the strongest single instrument by dollar EV in BOTH R1 (+$1,623/yr) and M1 (+$3,449/yr). 3x the gap-event frequency of US futures, 78% non-overlapping (truly diversifying). 100% R1 win rate caveat: ~10% of trades have near-zero credit (deep gaps where BS premium collapses); real edge is in the meaningful-credit subset.",
+      "caveats": [
+        "VIX used as σ proxy for NKD; JNIV (Nikkei vol index) would calibrate cleaner",
+        "Continuous contract rolls create ~4 synthetic events/yr (quarterly H/M/U/Z) — minor noise",
+        "Databento has 1-min OHLCV futures; option chain bid-ask must be verified before live sizing",
+        "All EV in constant-vol BS; skew on NKD options (likely steeper put skew given Nikkei tail-risk profile) will lower real-world EV"
+      ]
+    },
+    "nkd_exit_policy_test": {
+      "deliverables": ["phase3_nkd_exit_test.py", "cache/phase3_nkd_r1_sim.csv", "cache/phase3_nkd_m1_sim.csv"],
+      "r1_finding": "EOD dominates on NKD R1 just like on US futures. +328 annual EV, 100% win, worst $0. PT75 gives up 51 pts; SS25 craters at 38% win, -273 EV loss. Same dominance pattern as ES/NQ/RTY/YM.",
+      "m1_finding": "SS75 is even MORE attractive on NKD M1. EOD worst is -500 (vs -216 on US); SS75 caps to -251 (vs -64 on US). EV cost: only -9 pts on NKD (vs -47 on US). SS75 essentially free tail-risk insurance on NKD.",
+      "conclusion": "Locked rule set (R1 EOD, M1 SS75) transfers to NKD with no modification needed."
+    },
+    "final_universe_recommendation": {
+      "universe": ["ES", "NQ", "RTY", "YM", "NKD"],
+      "rules_locked": ["R1: mid-VIX × gap_down × bear-call @ prev_close × hold to 16:00",
+                       "M1: T2 × gap_up × bull-put @ open × SS75 stop else 16:00"],
+      "combined_per_contract_annual_ev_usd": {
+        "ES": 1710, "NQ": 2650, "RTY": 140, "YM": 1332, "NKD": 5072,
+        "total": 10904
+      },
+      "combined_events_per_year": 77.1,
+      "next_steps": [
+        "Skew-aware repricing — pull empirical IV skew for NKD options",
+        "Slippage stress test — subtract realistic bid-ask per spread",
+        "Live paper trade R1+M1 across all 5 symbols starting 2026-07-01",
+        "Hedged M1 variant for tail control on NKD (deeper put hedge)"
+      ]
+    },
+    "phase3_deliverables": [
+      "10_phase3_nkd.ipynb / .html — Phase 3 universe expansion + NKD validation, technical",
+      "11_strategy_brief.ipynb / .html — concise plain-English presentation, portfolio showcase",
+      ".planning/sizing-decision-log.md — $2K-per-trade sizing analysis log"
+    ]
+  },
+  "operational_rules": {
+    "databento_spending": "NEVER pull paid Databento data without explicit user permission. Cost-checks (metadata.get_cost) are free and OK; actual data fetches must be confirmed each time. As of 2026-06-23: ~$67.40 of $80 credits remaining.",
+    "live_data_sources": "Use free sources (yfinance for current quotes, cached Databento for historical) for routine daily workflow. Databento only for one-time research pulls with explicit budget approval."
+  },
+  "phase_4_kickoff": {
+    "date_started": "2026-06-23",
+    "trigger_event": "First real-market option quotes (IBKR, NQ + ES) on a live R1 signal day exposed that the BS-constant-vol backtest overestimates collectible credit. NQ R1 spec strikes priced at $158 credit / $7,341 max loss = 46:1 R:R. Breakeven win rate 97.9% vs backtest 94% -> uneconomic.",
+    "name": "Phase 4 — Real-World Pricing",
+    "core_problem": "Backtest used constant-vol BS pricing for both legs of each spread; real market has put-side skew + risk premium that the model ignores. The R1 / M1 spec strikes that looked positive-EV in backtest may not survive real option-chain pricing.",
+    "active_paths": {
+      "path_1_empirical_haircut": {
+        "description": "Sample real option chain prices for 10-20 historical R1/M1 setups. Compute average market-credit / model-credit ratio by (symbol, tier, vix_regime). Apply as haircut in backtest.",
+        "status": "planned",
+        "cost_estimate_usd": "~$20-40 of Databento for daily options chain over a few months",
+        "needs": "cost-check on Databento for ES/NQ daily options chain data"
+      },
+      "path_3_live_decision_layer": {
+        "description": "At trade time, pull (or paste) live option chain quotes. Compute real R:R + market-implied PoP. Apply thresholds (R:R <= 8:1 AND market_PoP >= 88%) to TAKE/SKIP decision. Logs every candidate (taken or skipped) for empirical sample building.",
+        "status": "building",
+        "files": ["paper_trading/decision_today.py", "paper_trading/pricing_log.csv"]
+      }
+    },
+    "deferred_paths": {
+      "path_2_skew_aware_repricing": "Full skew calibration + re-running full backtest. Defer until we have ~3 months of empirical data from Path 1+3.",
+      "path_4_vol_surface_model": "SVI / full surface model. Out of scope; would require team-level effort."
+    },
+    "strategic_realization": "R1's deep-OTM short strike (anchored at prev_close after a meaningful gap) is exactly where the market pays you the least. M1's ATM-anchored short captures real premium. The 'pricing problem' may actually be a 'strike selection' problem. A Phase 4 candidate rule: keep R1's signal filter (mid-VIX gap_down) but move K_short closer to spot (e.g., prev_close - 0.25*ATR). Preserves the directional filter, collects real credit.",
+    "todays_skipped_trades_logged": "paper_trading/pricing_log.csv — 2 entries (ES modified, NQ spec). Both SKIP decisions; logged for empirical haircut calibration.",
+    "decision_thresholds_v1": {
+      "max_rr_ratio": 8.0,
+      "min_market_implied_pop_pct": 88.0,
+      "rationale": "8:1 needs breakeven WR ~89%. Both R1 (backtest 94%) and M1 (backtest 56%) have specific WR profiles; M1 won't pass the PoP threshold so the threshold logic must be rule-aware or moved to per-rule. v1 is conservative; will calibrate after 10-20 samples."
+    }
+  },
+  "next_session_research_direction": {
+    "title": "Reverse-engineer the mentor's discretionary decision mechanism",
+    "context": "Mentor is producing $1,000+ realized P&L on 0DTE ES options daily, ~1 week running. Today's example: bull put spread @ 7,545/7,530, entered 05:00 ET (overnight Globex, before US open), exited 09:51 ET (~20 min into US RTH). Net +$1,397.52. The trader is in Israel, watching overnight ES, positioning before the US gap forms — opposite timing to R1/M1.",
+    "open_question": "What is the systematic-able core of his decision mechanism? He claims chart-based (support levels + EMA curl), but is doing it consistently enough that there's likely a repeatable pattern.",
+    "data_needed_from_user": [
+      "Multiple days of trade screenshots (entries + exits) — ideally 5-10 days",
+      "The chart at the moment of decision, with the drawn levels visible",
+      "Any verbal explanation from the mentor about HOW he picks the level + structure",
+      "Whether he sometimes loses (and what those trades look like)"
+    ],
+    "hypotheses_to_test": [
+      "Strike is always anchored at the prior US RTH close (R1-like but in reverse direction)",
+      "Strike is always at a 'round number' or major chart level",
+      "Entry timing is always X hours before US open",
+      "Exit is always at US open + 20-30 min, or at PT target",
+      "He filters by overnight range / VIX / volume profile in pre-market"
+    ],
+    "potential_research_path": [
+      "Pull overnight Globex 1-min ES (already have it via Databento) for the week of trades",
+      "Mark the trade entry/exit times on each day",
+      "Find the common features across entries (price level vs RTH close, time, EMA shape)",
+      "Build a candidate rule and backtest on the full 7-year sample",
+      "If it works, it's a third strategy alongside R1 and M1"
+    ],
+    "different_from_R1_M1": "R1/M1 fire at the US open AFTER observing the gap. Mentor's trade fires BEFORE the gap forms (in overnight Globex) and exits shortly after the open confirms the move. Different timing window entirely — possibly a separate edge to study."
+  },
+  "phase2_status": "phase2_complete",
   "completed_tasks": [
     {"id": 1, "name": "EDA — gap detection, trend alignment, EOD safety", "status": "done"},
     {"id": 2, "name": "ATR threshold sweep (0.25×→2.0×)", "status": "done"},
     {"id": 3, "name": "Strategy A backtest — OTM credit spread", "status": "done"},
     {"id": 4, "name": "Strategy B backtest — 90-min momentum debit", "status": "done"},
     {"id": 5, "name": "Strategy C backtest — day-after reversal", "status": "done"},
-    {"id": 6, "name": "Real trade analysis (Jun 15/17/18 screenshots)", "status": "done"},
-    {"id": 7, "name": "Phase 1 presentation notebook + HTML export", "status": "done"}
+    {"id": 6, "name": "Real trade analysis", "status": "done"},
+    {"id": 7, "name": "Phase 1 presentation notebook", "status": "done"},
+    {"id": 8, "name": "Stop-loss at prev_close", "status": "done", "finding": "Rejected — cuts winners, ~50% of breaches recover by EOD"},
+    {"id": 9, "name": "VIX × alignment × direction stratification", "status": "done", "finding": "R1 identified: mid-VIX × gap_down, 28.7/yr, +228 EV, worst -19.6"},
+    {"id": 10, "name": "Gap-size tier interaction", "status": "done", "finding": "T1 dominates; deeper gaps give LESS credit (BS effect)"},
+    {"id": "10b", "name": "Strike anchor: open vs prev_close", "status": "done", "finding": "Momentum edge at T2 × gap_up (not T3 as hypothesized)"},
+    {"id": 11, "name": "Exit-rule optimization for R1", "status": "done", "finding": "EOD hold optimal; no policy improves; 96% win rate means exits cap winners"},
+    {"id": "11b", "name": "Tail-risk control for T2 × gap_up momentum", "status": "done", "finding": "M1: SS75 caps tail from -229 to -63.5 (vs EOD); 73% win + ATM gamma means stops actually help"},
+    {"id": 12, "name": "Final Phase 2 presentation + paper-trade spec", "status": "done", "deliverables": ["09_phase2_presentation.ipynb", "09_phase2_presentation.html"]}
   ],
-  "remaining_tasks": [
-    {"id": 8, "name": "Model stop-loss at prev_close — rerun EV at 0.75×ATR", "status": "not_started"},
-    {"id": 9, "name": "VIX regime × alignment stratification table", "status": "not_started"},
-    {"id": 10, "name": "Gap size tier interaction analysis", "status": "not_started"},
-    {"id": 11, "name": "Exit rule optimization (PT target sweep)", "status": "not_started"},
-    {"id": 12, "name": "Build gap_phase2_conditional.ipynb", "status": "not_started"}
-  ],
-  "blockers": [],
-  "human_actions_pending": [],
-  "decisions": [
-    {
-      "decision": "0.75×ATR as Phase 2 primary threshold",
-      "rationale": "Triples trade frequency (14→37 unique days/yr) while keeping 93.3% EOD win rate; breakeven WR is 95.3% — only 2% gap, likely closable with stop loss",
-      "phase": "research"
+  "remaining_tasks": [],
+  "phase_2_final_rules": {
+    "R1": {
+      "name": "Mean reversion (primary)",
+      "universe": "ES, NQ, RTY, YM",
+      "trigger": "|gap|/ATR(14) >= 0.75, gap_down only",
+      "regime": "VIX(prev_close) in [15, 25)",
+      "structure": "1-DTE bear call spread, K_short=prev_close, K_long=prev_close+0.5*ATR",
+      "exit": "Hold to 16:00 ET",
+      "expected": {"n_yr": 28.7, "annual_ev": 228, "ev_per_trade": 7.96, "win_pct": 93.5, "worst": -19.6, "avg_credit": 8.6}
     },
-    {
-      "decision": "Stop loss at prev_close as Phase 2 first test",
-      "rationale": "Current model has no stop — losing trades cost 92.4% of spread width; a stop at the short strike level would limit losses to ~credit+slippage, potentially turning 0.75×ATR positive EV",
-      "phase": "research"
+    "M1": {
+      "name": "Momentum (secondary)",
+      "universe": "ES, NQ, RTY, YM",
+      "trigger": "1.0 <= |gap|/ATR(14) < 1.5, gap_up only",
+      "regime": "no VIX filter",
+      "structure": "1-DTE bull put spread anchored at OPEN, K_short=today_open, K_long=today_open-0.5*ATR",
+      "exit": "SS75 (close if low <= open - 0.75*width) else 16:00 ET",
+      "expected": {"n_yr": 11.6, "annual_ev": 226, "ev_per_trade": 19.5, "win_pct": 56, "worst": -63.5, "avg_credit": 44.2}
     },
-    {
-      "decision": "EOD hold as alternative exit to 60% PT",
-      "rationale": "97.5% win rate at 1.0×ATR means holding to 4pm captures full credit on almost all trades; 60% PT leaves money on the table",
-      "phase": "research"
-    }
+    "combined": {"signals_yr": 40.3, "annual_ev": 454, "worst_single_trade": -63.5}
+  },
+  "deliverables_phase2": [
+    "05_phase2_stop_loss.ipynb/.html",
+    "06_phase2_stratify.ipynb/.html",
+    "07_phase2_gap_tiers.ipynb/.html",
+    "07b_phase2_momentum_anchor.ipynb/.html",
+    "08_phase2_exit_rules.ipynb/.html",
+    "08b_phase2_t2_momentum_tail.ipynb/.html",
+    "09_phase2_presentation.ipynb/.html (FINAL)",
+    "charts/p2_01..p2_08 + p2_pres_01..05",
+    "cache/phase2_events_075.csv, phase2_r1_exit_sim.csv, phase2_t2u_exit_sim.csv, phase2_t2u_events.csv"
   ],
-  "uncommitted_files": [
-    ".planning/.continue-here.md",
-    "gap_spread_research.ipynb",
-    "build_presentation.py",
-    "build_strategy_notebook.py",
-    "gap_research_phase1.html",
-    "gap_research_phase1.ipynb",
-    "gap_strategy_v2.ipynb"
+  "phase_3_open_questions": [
+    "Skew-aware repricing — pull empirical IV skew, recompute R1/M1 credit (expect 10-20% EV haircut)",
+    "Slippage stress test — subtract 0.5/1.0/2.0 pt slippage per trade",
+    "Live paper trade R1 + M1 from 2026-07-01 for one quarter",
+    "Hedged variants — buy deep OTM option to cap M1 tail from -63 to ~-20",
+    "Position sizing by worst-trade ratio (R1 can size 3x larger than M1 for equal drawdown exposure)"
   ],
-  "next_action": "Add stop-loss-at-prev_close to Strategy A backtest and rerun EV at each ATR threshold — then build VIX regime × alignment stratification table",
-  "context_notes": "Phase 1 complete. The core finding is solid (97.5% EOD safety) but the simple credit spread structure barely exploits it. The key insight discovered this session: breakeven win rate rises as credit/width falls, so lowering ATR threshold hurts EV despite raising trade frequency. Phase 2 needs two levers: (1) stop loss to cap losing trade costs, (2) secondary filters to identify high-conviction subset where actual win rate exceeds the breakeven threshold."
+  "context_notes": "Phase 2 complete. Two non-overlapping rules: R1 (gap_down mean reversion, ~$11K/yr/contract, $980 worst) and M1 (gap_up momentum w/SS75, ~$11K/yr/contract, $3175 worst). Combined annual EV ~$23K per symbol-contract, max single-day loss ~$3175. Notebooks renumbered chronologically. All scripts, build scripts, charts, and caches present. Ready for Phase 3 stress tests OR live paper trading."
 }

@@ -1,9 +1,17 @@
 cache/
 data/
 charts/
+charts/mentor trades/
 .ipynb_checkpoints/
 __pycache__/
 *.pyc
 .DS_Store
 venv/
 .env
+
+# Personal trading logs (paper-trade state) — do not commit
+paper_trading/trades.csv
+paper_trading/pricing_log.csv
+
+# Cron output logs
+logs/
